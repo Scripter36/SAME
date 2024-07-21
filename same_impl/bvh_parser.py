@@ -1,76 +1,76 @@
 import numpy as np
 from lark import Lark, Transformer
+from panda3d.core import Vec3
+
+from same_impl.motion_struct import Joint, Motion
 
 grammar = '''
-%import common.CNAME -> NAME
-%import common.SIGNED_FLOAT -> FLOAT
+%import common.LETTER
+%import common.DIGIT
+%import common.SIGNED_NUMBER -> NUMBER
 %import common.INT
 %import common.WS
 %ignore WS
+
 CHANNEL: "Xposition" | "Yposition" | "Zposition" | "Xrotation" | "Yrotation" | "Zrotation"
+NAME: ("_"|LETTER) ("_"|LETTER|DIGIT|":")*
 
 channels: "CHANNELS" INT (CHANNEL)+
-offset: "OFFSET" FLOAT FLOAT FLOAT
+offset: "OFFSET" NUMBER NUMBER NUMBER
 
 start: "HIERARCHY" root "MOTION" motion
 root: "ROOT" NAME "{" offset channels (joint | end_joint)+ "}"
 joint: "JOINT" NAME "{" offset channels (joint | end_joint)+ "}"
 end_joint: "End" "Site" "{" offset "}"
-motion: "Frames:" INT "Frame Time:" FLOAT data
-data: (FLOAT)+
+motion: "Frames:" INT "Frame Time:" NUMBER data
+data: (NUMBER)+
 '''
 
 
 class BVHParser(Transformer):
     def start(self, children):
-        return {
-            'hierarchy': children[0],
-            'motion': children[1]
-        }
+        return children[0], children[1]
 
     def root(self, children):
-        return {
-            'name': children[0],
-            'offset': children[1],
-            'channels': children[2],
-            'children': children[3:]
-        }
+        return Joint(
+            name=children[0],
+            offset=children[1],
+            channels=children[2],
+            children=children[3:],
+            type='root'
+        )
 
     def joint(self, children):
-        return {
-            'name': children[0],
-            'offset': children[1],
-            'channels': children[2],
-            'children': children[3:]
-        }
+        return Joint(
+            name=children[0],
+            offset=children[1],
+            channels=children[2],
+            children=children[3:],
+            type='joint'
+        )
 
     def end_joint(self, children):
-        return {
-            'name': 'end',
-            'offset': children[0]
-        }
+        return Joint(
+            name='end',
+            offset=children[0],
+            channels=[],
+            children=[],
+            type='end'
+        )
 
     def offset(self, children):
-        return {
-            'x': children[0],
-            'y': children[1],
-            'z': children[2]
-        }
+        return Vec3(children[0], children[1], children[2])
 
     def channels(self, children):
         return children[1:]
 
     def motion(self, children):
-        return {
-            'frames': children[0],
-            'frame_time': children[1],
-            'data': children[2]
-        }
+        return Motion(frames=children[0], frame_time=children[1], data=children[2])
 
     def data(self, children):
         return children
 
-    def FLOAT(self, token):
+    def NUMBER(self, token):
         return float(token)
 
     def INT(self, token):
@@ -83,24 +83,24 @@ class BVHParser(Transformer):
         return token.value
 
 
-def calc_total_channels(hierarchy):
-    total_channels = len(hierarchy['channels']) if 'channels' in hierarchy else 0
-    if 'children' in hierarchy:
-        for child in hierarchy['children']:
-            total_channels += calc_total_channels(child)
-    return total_channels
-
-
-def parse_bvh(file_path):
+def parse_bvh(file_path) -> (Joint, Motion):
+    # read and parse the bvh file
     with open(file_path) as file:
         bvh = file.read()
     parser = Lark(grammar, parser='lalr', transformer=BVHParser())
-    result = parser.parse(bvh)
 
-    total_channels = calc_total_channels(result['hierarchy'])
-    assert total_channels * result['motion']['frames'] == len(result['motion']['data']), \
-        f"Total channels {total_channels} does not match motion data {len(result['motion']['data'])} and frames {result['motion']['frames']}"
+    skeleton: Joint
+    motion: Motion
+    skeleton, motion = parser.parse(bvh)
+    skeleton.cache_channel_index()
 
-    result['motion']['data'] = np.array(result['motion']['data']).reshape(result['motion']['frames'], total_channels)
+    # reshape motion data
+    total_channels = 0
+    for node in skeleton.traverse_pre_order():
+        total_channels += len(node.channels)
+    assert total_channels * motion.frames == len(motion.data), \
+        f"Total channels {total_channels} and frame {motion.frames} does not match motion data {len(motion.data)}"
 
-    return result
+    motion.data = np.array(motion.data).reshape(motion.frames, total_channels)
+
+    return skeleton, motion

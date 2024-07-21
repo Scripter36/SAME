@@ -2,9 +2,8 @@ import time
 
 import simplepbr
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import DirectionalLight, AmbientLight, BoundingVolume
 
-from same_impl.bvh_parser import parse_bvh
+from same_impl.motion_database import MotionDatabase
 from same_impl.orbit_control import OrbitControl
 from same_impl.skeleton_visualizer import SkeletonVisualizer
 
@@ -14,14 +13,6 @@ class MainScene(ShowBase):
         ShowBase.__init__(self)
 
         simplepbr.init()
-
-        # Load the environment model.
-        # self.scene = self.loader.load_model("models/environment")
-        # # Reparent the model to render.
-        # self.scene.reparent_to(self.render)
-        # # Apply scale and position transforms on the model.
-        # self.scene.set_scale(0.25, 0.25, 0.25)
-        # self.scene.set_pos(-8, 42, 0)
 
         self.floor = self.loader.load_model('models/grid_floor.glb')
         self.floor.look_at(0, 0, -1)
@@ -53,22 +44,46 @@ class MainScene(ShowBase):
         self.disable_mouse()
         self.orbit_control = OrbitControl(self.mouseWatcherNode, self.camera, self.win)
 
+        # load motions
+        self.motion_database = MotionDatabase()
+        self.motion_database.load_bvh('data/LocomotionFlat01_000.bvh', 'LocomotionFlat01_000')
+
         # show skeleton
-        self.bvh_data = parse_bvh('data/LocomotionFlat01_000.bvh')
-        self.skeleton_visualizer = SkeletonVisualizer(self.render, self.loader, self.bvh_data['hierarchy'])
+        skeleton = self.motion_database.get_skeleton('LocomotionFlat01_000')
+        motion = self.motion_database.get_motion('LocomotionFlat01_000')
+        self.motion = motion
+        self.skeleton_visualizer = SkeletonVisualizer(self.render, self.loader, skeleton)
         self.current_frame = 0
-        self.skeleton_visualizer.update_joint(self.bvh_data['motion']['data'][0])
+        self.skeleton_visualizer.update_joint(motion.data[0])
+
+        for i in range(10):
+            variation_name = self.motion_database.add_variation('LocomotionFlat01_000')
+            new_skeleton = self.motion_database.get_skeleton(variation_name)
+            new_skeleton_visualizer = SkeletonVisualizer(self.render, self.loader, new_skeleton)
+            new_skeleton_visualizer.skeleton_np.set_pos(new_skeleton_visualizer.skeleton_np, 0, 0, -10 * i)
 
         self.start_time = time.time()
         self.taskMgr.add(self.update_frame, 'update_frame')
 
         self.accept('escape', self.userExit)
 
+        # press q to toggle animation
+        self.accept('q', self.toggle_animation)
+
     def userExit(self):
         self.destroy()
 
+    show_anim = True
+
     def update_frame(self, task):
         current_time = time.time()
-        self.current_frame = int((current_time - self.start_time) / self.bvh_data['motion']['frame_time']) % self.bvh_data['motion']['frames']
-        self.skeleton_visualizer.update_joint(self.bvh_data['motion']['data'][self.current_frame])
+        if self.show_anim:
+            self.current_frame = int((current_time - self.start_time) / self.motion.frame_time) % \
+                                 self.motion.frames
+            self.skeleton_visualizer.update_joint(self.motion.data[self.current_frame])
+        else:
+            self.skeleton_visualizer.clear_joint_transform()
         return task.cont
+
+    def toggle_animation(self):
+        self.show_anim = not self.show_anim

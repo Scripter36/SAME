@@ -14,7 +14,8 @@ class OrbitControl(DirectObject):
     speed = 0.1
     distance = 10
 
-    def __init__(self, mouse_watcher_node: panda3d.core.MouseWatcher, camera: panda3d.core.Camera, win: panda3d.core.WindowHandle):
+    def __init__(self, mouse_watcher_node: panda3d.core.MouseWatcher, camera: panda3d.core.Camera,
+                 win: panda3d.core.WindowHandle):
         DirectObject.__init__(self)
 
         self.mouse_watcher_node = mouse_watcher_node
@@ -36,16 +37,16 @@ class OrbitControl(DirectObject):
             y = self.mouse_watcher_node.get_mouse_y()
             dx = x - self.last_x
             dy = y - self.last_y
-            dx = dx * self.win.get_x_size()
-            dy = dy * self.win.get_y_size()
             if self.last_x != -1:
                 if self.mouse_watcher_node.is_button_down(MouseButton.two()):
+                    dx = dx * self.win.get_x_size()
+                    dy = dy * self.win.get_y_size()
                     self.yaw -= dx * self.speed
                     self.pitch += dy * self.speed
                     quat = LRotation((1, 0, 0), self.pitch) * LRotation((0, 1, 0), self.yaw)
                     self.camera_center.set_quat(quat)
                 elif self.mouse_watcher_node.is_button_down(MouseButton.one()):
-                    self.camera_center.set_pos(self.camera_center, -dx * self.distance / 2, 0, -dy * self.distance / 2)
+                    self.camera_center.set_pos(self.camera_center, -dx * self.distance / 2, -dy * self.distance / 2, 0)
 
             self.last_x = x
             self.last_y = y
